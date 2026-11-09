@@ -120,12 +120,18 @@ async def get_link(c: CallbackQuery):
             logging.warning("invite failed: %s", e)
             return await c.answer("Не удалось создать ссылку", show_alert=True)
         url = link.invite_link
-    else:
+    elif r["type"] == "tmp":
         t = secrets.token_urlsafe(16)
         tokens[t] = (r["value"], time.time() + TTL)
         url = f"{BASE_URL}/go/{t}"
+    else:
+        url = r["value"]
+    if r["type"] in ("chat", "tmp"):
+        note = "⏳ Действует 10 минут, потом сообщение удалится"
+    else:
+        note = "⏳ Сообщение удалится через 10 минут"
     sent = await c.message.answer(
-        f"{r['title']}\n{url}\n⏳ Действует 10 минут, потом сообщение удалится",
+        f"{r['title']}\n{url}\n{note}",
         link_preview_options=NO_PREVIEW,
     )
     spawn(delete_later(sent))
@@ -136,7 +142,8 @@ async def get_link(c: CallbackQuery):
 HELP = (
     "Команды админа:\n"
     "/add Название | chat | -100123…  (ID чата, бот там админ)\n"
-    "/add Название | url | https://…\n"
+    "/add Название | url | https://…  (ссылка как есть)\n"
+    "/add Название | tmp | https://…  (через бота, 10 минут)\n"
     "/edit N | Название | тип | значение\n"
     "/del N\n"
     "/admin — список и кнопки удаления"
@@ -149,7 +156,7 @@ def is_admin(m) -> bool:
 
 def parse_item(parts):
     title, typ, val = [p.strip() for p in parts]
-    if not title or typ not in ("chat", "url"):
+    if not title or typ not in ("chat", "url", "tmp"):
         raise ValueError
     if typ == "chat":
         val = int(val)
