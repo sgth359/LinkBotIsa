@@ -12,6 +12,7 @@ TOKEN = os.environ["BOT_TOKEN"]
 BASE_URL = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
 PORT = int(os.environ.get("PORT", 10000))
 TTL = 600  # 10 минут
+COOLDOWN = 1800  # 1 ссылка на человека на каждый ресурс раз в 30 минут (админы без лимита)
 
 # Админы (Telegram ID через запятую). Свой ID: команда /id
 ADMINS = {int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip()}
@@ -30,6 +31,7 @@ dp = Dispatcher()
 resources: list = []
 store_msg_id = None
 tokens = {}  # token -> (url, expires_at)
+last_req = {}  # (user_id, ресурс) -> время последней выданной ссылки
 bg = set()
 NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
 
@@ -111,6 +113,16 @@ async def get_link(c: CallbackQuery):
         r = resources[int(c.data[4:])]
     except (ValueError, IndexError):
         return await c.answer("Список обновился, нажми /start", show_alert=True)
+    uid = c.from_user.id
+    key = (uid, str(r["value"]))
+    if uid not in ADMINS:
+        left = last_req.get(key, 0) + COOLDOWN - time.time()
+        if left > 0:
+            return await c.answer(
+                f"Эту ссылку можно взять снова через {int(left // 60) + 1} мин.",
+                show_alert=True,
+            )
+        last_req[key] = time.time()
     if r["type"] == "chat":
         try:
             link = await bot.create_chat_invite_link(
@@ -118,6 +130,7 @@ async def get_link(c: CallbackQuery):
             )
         except TelegramBadRequest as e:
             logging.warning("invite failed: %s", e)
+            last_req.pop(key, None)
             return await c.answer("Не удалось создать ссылку", show_alert=True)
         url = link.invite_link
     elif r["type"] == "tmp":
@@ -265,6 +278,8 @@ async def keepalive():
             now = time.time()
             for k in [k for k, v in tokens.items() if v[1] < now]:
                 tokens.pop(k, None)
+            for u in [u for u, t in last_req.items() if t + COOLDOWN < now]:
+                last_req.pop(u, None)
 
 
 async def main():
